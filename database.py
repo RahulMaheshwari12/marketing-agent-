@@ -1,22 +1,23 @@
 import os
 from dotenv import load_dotenv
-from qdrant_client import AsyncQdrantClient
+from qdrant_client import QdrantClient, AsyncQdrantClient
 import firebase_admin
 from firebase_admin import credentials, firestore
-from sqlmodel import SQLModel, Field
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker
-from typing import Optional
-from datetime import datetime
 
 # Load environment variables
 load_dotenv()
 
 # =====================================================================
-# 1. Asynchronous Qdrant (Vector DB) Client
+# 1. Qdrant (Vector DB) Clients
 # =====================================================================
 qdrant_url = os.getenv("QDRANT_URL", "http://localhost:6333")
 qdrant_api_key = os.getenv("QDRANT_API_KEY", "")
+
+# Initialize sync Qdrant Client (for LangChain compatibility)
+qdrant_client = QdrantClient(
+    url=qdrant_url,
+    api_key=qdrant_api_key if qdrant_api_key else None
+)
 
 # Initialize ASYNC Qdrant Client
 async_qdrant_client = AsyncQdrantClient(
@@ -45,52 +46,23 @@ if firebase_admin._apps:
     async_firestore_db = firestore.AsyncClient.from_service_account_json(firebase_cred_path)
 
 
-# =====================================================================
-# 3. Asynchronous SQLModel / PostgreSQL (Campaign DB)
-# =====================================================================
-# We use PostgreSQL with asyncpg driver (Production Standard)
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost:5432/campaigns")
-
-# Create Async Engine
-async_engine = create_async_engine(DATABASE_URL, echo=False)
-
-# Session factory for AsyncSession
-async_session_maker = sessionmaker(
-    async_engine, class_=AsyncSession, expire_on_commit=False
-)
-
-# Define the Campaign model (All draft fields are Optional for selective generation)
-class Campaign(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    event_id: str = Field(index=True)  # Acts as the folder ID (e.g. bootcamp_july_2026)
-    campaign_name: str
-    newsletter_draft: Optional[str] = Field(default=None)
-    email_draft_subject: Optional[str] = Field(default=None)
-    email_draft_body: Optional[str] = Field(default=None)
-    social_draft: Optional[str] = Field(default=None)
-    status: str = Field(default="pending_review")  # pending_review, approved, rejected
-    email_status: str = Field(default="not_started")  # not_started, success, failed
-    social_status: str = Field(default="not_started")  # not_started, success, failed
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-
-# Helper function to create tables asynchronously
-async def init_db():
-    async with async_engine.begin() as conn:
-        await conn.run_sync(SQLModel.metadata.create_all)
-
-# Dependency to get Async database sessions
-async def get_async_db():
-    async with async_session_maker() as session:
-        yield session
-
-
-# Quick self-test script
+# Quick self-test script to verify connections
 if __name__ == "__main__":
     import asyncio
     
     async def main():
-        print("Initializing async database tables...")
-        await init_db()
-        print("Async database tables created successfully!")
+        print("Checking database connections...")
+        # Check Qdrant connection
+        try:
+            collections = await async_qdrant_client.get_collections()
+            print(f"✓ Connected to Qdrant successfully! (Found {len(collections.collections)} collections)")
+        except Exception as e:
+            print(f"❌ Failed to connect to Qdrant: {e}")
+            
+        # Check Firebase connection
+        if async_firestore_db:
+            print("✓ Connected to Firebase Firestore successfully!")
+        else:
+            print("❌ Firebase Firestore client not initialized.")
         
     asyncio.run(main())
