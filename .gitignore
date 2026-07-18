@@ -3,3 +3,4 @@ firebase_key.json
 __pycache__/
 *.db
 .venv/
+marketing_agent_summary.html
