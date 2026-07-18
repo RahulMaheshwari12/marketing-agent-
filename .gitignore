@@ -4,3 +4,6 @@ __pycache__/
 *.db
 .venv/
 marketing_agent_summary.html
+list_models.py
+sample_event.txt
+test_bootcamp.txt

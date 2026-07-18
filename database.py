@@ -1,6 +1,6 @@
 import os
 from dotenv import load_dotenv
-from qdrant_client import AsyncQdrantClient
+from qdrant_client import QdrantClient, AsyncQdrantClient
 import firebase_admin
 from firebase_admin import credentials, firestore
 
@@ -8,10 +8,16 @@ from firebase_admin import credentials, firestore
 load_dotenv()
 
 # =====================================================================
-# 1. Asynchronous Qdrant (Vector DB) Client
+# 1. Qdrant (Vector DB) Clients
 # =====================================================================
 qdrant_url = os.getenv("QDRANT_URL", "http://localhost:6333")
 qdrant_api_key = os.getenv("QDRANT_API_KEY", "")
+
+# Initialize sync Qdrant Client (for LangChain compatibility)
+qdrant_client = QdrantClient(
+    url=qdrant_url,
+    api_key=qdrant_api_key if qdrant_api_key else None
+)
 
 # Initialize ASYNC Qdrant Client
 async_qdrant_client = AsyncQdrantClient(
