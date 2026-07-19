@@ -6,14 +6,14 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 
 load_dotenv()
 
-# Model for reasoning and validation (highly objective, temperature=0)
+# Strict validation model (temperature=0)
 llm_strict = ChatGoogleGenerativeAI(model="gemini-flash-latest", temperature=0)
 
-# Model for copywriting and creative drafts (engaging marketing tone, temperature=0.7)
+# Creative copywriting model (temperature=0.7)
 llm_creative = ChatGoogleGenerativeAI(model="gemini-flash-latest", temperature=0.7)
 
 def _parse_content(content) -> str:
-    """Helper to ensure we extract a clean string from both text blocks and content array lists."""
+    """Safe parser to extract flat strings from LangChain content block arrays."""
     if isinstance(content, list):
         parts = []
         for part in content:
@@ -26,19 +26,19 @@ def _parse_content(content) -> str:
 
 
 # =====================================================================
-# 1. Supervisor Coordinator Agent
+# Campaign Coordinator & Router
 # =====================================================================
 
 class SupervisorRouting(BaseModel):
     event_id: str = Field(
-        description="The event slug (e.g., 'nextjs_bootcamp', 'test_hackathon') extracted from the user's request."
+        description="The event slug (e.g., 'nextjs_bootcamp') matched against valid database IDs."
     )
     target_contents: list[Literal["email", "newsletter", "social"]] = Field(
-        description="The list of content formats the user wants to generate. Can contain 'email', 'newsletter', and/or 'social'."
+        description="The target campaign channels to trigger."
     )
 
 async def run_supervisor(user_prompt: str, valid_event_ids: list[str]) -> SupervisorRouting:
-    """Parses user input to extract the event_id and target content channels, matching against valid database IDs."""
+    """Orchestrates campaign layout requests by extracting the target event ID and content channels."""
     structured_llm = llm_strict.with_structured_output(SupervisorRouting)
     
     prompt = f"""
@@ -59,11 +59,11 @@ async def run_supervisor(user_prompt: str, valid_event_ids: list[str]) -> Superv
 
 
 # =====================================================================
-# 2. Copywriter Agents (Email, Newsletter, Social)
+# Copywriting Agents (Email, Newsletter, Social)
 # =====================================================================
 
 async def run_email_writer(event_id: str, campaign_facts: str, layout: str, feedback: str = "") -> str:
-    """Generates or refines promotional email copy, auto-adapting the tone to Students or Professionals."""
+    """Drafts promotional email copy tailored dynamically to student or professional audience profiles."""
     prompt = f"""
     You are a professional Email Marketing Copywriter at HiDevs.
     
@@ -100,7 +100,7 @@ async def run_newsletter_writer(
     layout: str, 
     feedback: str = ""
 ) -> str:
-    """Generates an end-of-month review newsletter highlighting HiDevs event wrap-ups, trainer spotlight, and emerging industry tech trends in a unified community tone."""
+    """Drafts monthly newsletter digests using highlights, emerging trends, and trainer spotlight sections."""
     prompt = f"""
     You are a professional Newsletter Content Editor at HiDevs.
     
@@ -145,7 +145,7 @@ async def run_newsletter_writer(
 
 
 async def run_social_writer(event_id: str, campaign_facts: str, layout: str, feedback: str = "") -> str:
-    """Generates or refines social media posts (LinkedIn/Twitter), auto-adapting tone to Students or Professionals."""
+    """Drafts social media updates matching hooks and hashtags to target developer demographics."""
     prompt = f"""
     You are a Social Media Manager at HiDevs.
     
@@ -174,19 +174,19 @@ async def run_social_writer(event_id: str, campaign_facts: str, layout: str, fee
 
 
 # =====================================================================
-# 3. Verification Checker Agents (Fact-Checker, Style-Checker)
+# Verification Checkers
 # =====================================================================
 
 class CheckerResult(BaseModel):
     status: Literal["PASS", "FAIL"] = Field(
-        description="Output 'PASS' if the content is 100% correct, or 'FAIL' if any issues are found."
+        description="Verification outcome status."
     )
     feedback: str = Field(
-        description="If FAIL, provide a clear, bulleted list of issues that the copywriter must correct. If PASS, return an empty string."
+        description="Bulleted feedback logs describing required edits (empty if PASS)."
     )
 
 async def run_fact_checker(content_type: str, draft: str, campaign_facts: str, event_metadata: dict) -> CheckerResult:
-    """Compares the draft copy against raw database facts to check for price, links, dates, and syllabus errors."""
+    """Cross-checks generated draft details against metadata parameters and syllabus facts to prevent errors."""
     structured_llm = llm_strict.with_structured_output(CheckerResult)
     
     prompt = f"""
@@ -217,7 +217,7 @@ async def run_fact_checker(content_type: str, draft: str, campaign_facts: str, e
 
 
 async def run_style_checker(content_type: str, draft: str, brand_guidelines: str, layout_template: str) -> CheckerResult:
-    """Verifies that the draft adheres to the brand tone rules and follows the structural layout template."""
+    """Validates structural layout alignments and brand tone guidelines compliance."""
     structured_llm = llm_strict.with_structured_output(CheckerResult)
     
     prompt = f"""
@@ -246,11 +246,11 @@ async def run_style_checker(content_type: str, draft: str, brand_guidelines: str
 
 
 # =====================================================================
-# 4. Final Content Director Reviewer Agent
+# Holistic Campaign Review
 # =====================================================================
 
 async def run_final_reviewer(email_draft: str = "", newsletter_draft: str = "", social_draft: str = "") -> CheckerResult:
-    """Performs a holistic review of all completed drafts to ensure consistent tone across the campaign."""
+    """Holistic review of all content assets to guarantee overall messaging cohesion."""
     structured_llm = llm_strict.with_structured_output(CheckerResult)
     
     prompt = f"""
