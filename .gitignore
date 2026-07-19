@@ -14,3 +14,6 @@ trainer_bios.txt
 *.log
 .pytest_cache/
 .ipynb_checkpoints/
+tools_and_testing_report.md
+tools_and_testing_report.html
+test_agents.py

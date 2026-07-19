@@ -91,6 +91,13 @@ async def get_layout_template_base(event_id: str, content_type: str) -> str:
     }
     return defaults.get(content_type, "")
 
+#getting the list of all registered event IDs from firestore
+async def get_all_active_events_base() -> list[str]:
+    """Retrieves a list of all event document IDs currently registered in Firestore."""
+    if not async_firestore_db:
+        raise RuntimeError("Firebase Firestore client is not initialized.")
+    return [doc.id async for doc in async_firestore_db.collection("events").list_documents()]
+
 #tool for retrieving event metadata from firestore for a given event_id
 @tool
 async def get_event_metadata_tool(event_id: str) -> dict:
@@ -172,3 +179,9 @@ async def verify_url_status_tool(url: str) -> bool:
             return response.status_code == 200
     except Exception:
         return False
+
+#tool for retrieving the list of all registered event IDs from firestore
+@tool
+async def get_all_active_events_tool() -> list[str]:
+    """Retrieves a list of all active event IDs currently stored in the database."""
+    return await get_all_active_events_base()
