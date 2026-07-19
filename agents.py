@@ -100,13 +100,13 @@ async def run_newsletter_writer(
     layout: str, 
     feedback: str = ""
 ) -> str:
-    """Generates an end-of-month review newsletter highlighting HiDevs event wrap-ups, trainer spotlight, and emerging industry tech trends."""
+    """Generates an end-of-month review newsletter highlighting HiDevs event wrap-ups, trainer spotlight, and emerging industry tech trends in a unified community tone."""
     prompt = f"""
     You are a professional Newsletter Content Editor at HiDevs.
     
     TASK:
-    1. Read the verified details about the target campaign.
-    2. Write an engaging, high-value end-of-month newsletter segment for '{event_id}'.
+    1. Write an engaging, high-value end-of-month community newsletter segment for '{event_id}'.
+    2. Maintain a unified community tone that appeals to BOTH professionals (high tech value, industry standards) and students/career transitioners (accessibility, learning, networking) simultaneously.
     3. Include three core sections:
        - AI House Wrap-up: Summarize what happened in our AI house this month (workshops, hackathons, student progress) using the provided Highlights.
        - Emerging Tech Trends: Detail the new technologies, releases, or trends emerging in this field.
