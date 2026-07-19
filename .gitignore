@@ -7,3 +7,10 @@ marketing_agent_summary.html
 list_models.py
 sample_event.txt
 test_bootcamp.txt
+test_tools.py
+brand_guidelines.txt
+trainer_bios.txt
+*.pyc
+*.log
+.pytest_cache/
+.ipynb_checkpoints/
