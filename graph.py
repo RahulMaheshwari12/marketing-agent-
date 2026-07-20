@@ -43,29 +43,36 @@ class CampaignState(TypedDict):
 #Node 1: Supervisor Node (Coordinator / Router)
 async def supervisor_node(state: CampaignState) -> Dict:
     """Parses natural language prompt and routes targets using the Supervisor Agent."""
-    try:
-        active_events = await get_all_active_events_tool()
-    except Exception:
-        active_events = "[]"
-        
-    valid_events = []
-    # Clean up the output string to parse event slugs
-    for line in active_events.split("\n"):
-        if "Slug:" in line:
-            slug = line.split("Slug:")[1].strip().split(",")[0].strip()
-            valid_events.append(slug)
-            
-    if not valid_events:
-        valid_events = ["nextjs_bootcamp", "test_hackathon"] # Safe defaults
+    event_id = state.get("event_id")
+    target_contents = state.get("target_contents")
 
-    try:
-        routing = await run_supervisor(state["user_prompt"], valid_events)
-        event_id = routing.event_id
-        target_contents = routing.target_contents
-    except Exception:
-        # Graceful fallback if supervisor fails
-        event_id = "test_hackathon"
-        target_contents = ["email", "social"]
+    # If event_id or target_contents are not pre-populated, use the Supervisor Agent to parse them
+    if not event_id or not target_contents:
+        try:
+            active_events = await get_all_active_events_tool()
+        except Exception:
+            active_events = "[]"
+            
+        valid_events = []
+        for line in active_events.split("\n"):
+            if "Slug:" in line:
+                slug = line.split("Slug:")[1].strip().split(",")[0].strip()
+                valid_events.append(slug)
+                
+        if not valid_events:
+            valid_events = ["nextjs_bootcamp", "test_hackathon"]
+
+        try:
+            routing = await run_supervisor(state["user_prompt"], valid_events)
+            if not event_id:
+                event_id = routing.event_id
+            if not target_contents:
+                target_contents = routing.target_contents
+        except Exception:
+            if not event_id:
+                event_id = "test_hackathon"
+            if not target_contents:
+                target_contents = ["email", "social"]
 
     return {
         "event_id": event_id,

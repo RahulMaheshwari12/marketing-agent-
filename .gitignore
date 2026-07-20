@@ -22,3 +22,8 @@ test_graph_scenarios.py
 test_channel_scenarios.py
 agents_and_graph_status.html
 graph_routing_tests.html
+demo_pipeline.py
+drafts_context_note.html
+ui_and_api_implementation_plan.html
+generated_campaign_drafts.html
+future_implementation_plan.html
