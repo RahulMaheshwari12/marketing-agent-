@@ -3,14 +3,6 @@ import asyncio
 import argparse
 import hashlib
 from google.cloud import firestore
-
-def calculate_file_hash(file_path: str) -> str:
-    """Calculates the MD5 hash of a file's raw bytes to detect duplicates."""
-    hasher = hashlib.md5()
-    with open(file_path, "rb") as f:
-        for chunk in iter(lambda: f.read(4096), b""):
-            hasher.update(chunk)
-    return hasher.hexdigest()
 from dotenv import load_dotenv
 from typing import Literal
 from pydantic import BaseModel, Field
@@ -22,6 +14,15 @@ from qdrant_client.models import Filter, FieldCondition, MatchValue
 
 # Import our database clients from database.py
 from database import qdrant_client, async_firestore_db
+
+def calculate_file_hash(file_path: str) -> str:
+    """Calculates the MD5 hash of a file's raw bytes to detect duplicates."""
+    hasher = hashlib.md5()
+    with open(file_path, "rb") as f:
+        for chunk in iter(lambda: f.read(4096), b""):
+            hasher.update(chunk)
+    return hasher.hexdigest()
+
 
 load_dotenv()  # Load environment variables from .env file
 
@@ -43,7 +44,8 @@ class DocumentRouting(BaseModel):
             "'professional' (trainer biography/profile), "
             "'brand_style' (branding guidelines/tone of voice/copy rules), "
             "'layout_template' (structure outlines for email/newsletter/social), or "
-            "'few_shot_example' (previously approved campaign copy used as few-shot references)."
+            "'few_shot_example' (previously approved campaign copy used as few-shot references, "
+            "or emerging technology release notes, framework updates, and technical trends)."
         )
     )
     event_id_suggestion: str = Field(
@@ -53,7 +55,8 @@ class DocumentRouting(BaseModel):
             "If category is 'professional', output 'trainers'. "
             "If category is 'brand_style', output 'branding'. "
             "If category is 'layout_template', output 'templates'. "
-            "If category is 'few_shot_example', output 'few_shots'."
+            "If category is 'few_shot_example' and it contains technical trends/release notes/framework updates, output 'trends'. "
+            "If category is 'few_shot_example' and it is an approved copy reference, output 'few_shots'."
         )
     )
 

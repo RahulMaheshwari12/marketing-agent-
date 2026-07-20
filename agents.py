@@ -7,10 +7,10 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 load_dotenv()
 
 # Strict validation model (temperature=0)
-llm_strict = ChatGoogleGenerativeAI(model="gemini-flash-latest", temperature=0)
+llm_strict = ChatGoogleGenerativeAI(model="gemini-flash-lite-latest", temperature=0)
 
 # Creative copywriting model (temperature=0.7)
-llm_creative = ChatGoogleGenerativeAI(model="gemini-flash-latest", temperature=0.7)
+llm_creative = ChatGoogleGenerativeAI(model="gemini-flash-lite-latest", temperature=0.7)
 
 def _parse_content(content) -> str:
     """Safe parser to extract flat strings from LangChain content block arrays."""
@@ -25,10 +25,7 @@ def _parse_content(content) -> str:
     return str(content)
 
 
-# =====================================================================
-# Campaign Coordinator & Router
-# =====================================================================
-
+#campaign coordinator & router
 class SupervisorRouting(BaseModel):
     event_id: str = Field(
         description="The event slug (e.g., 'nextjs_bootcamp') matched against valid database IDs."
@@ -58,10 +55,7 @@ async def run_supervisor(user_prompt: str, valid_event_ids: list[str]) -> Superv
     return await structured_llm.ainvoke(prompt)
 
 
-# =====================================================================
-# Copywriting Agents (Email, Newsletter, Social)
-# =====================================================================
-
+#copywriting agents (email, newsletter, social)
 async def run_email_writer(event_id: str, campaign_facts: str, layout: str, feedback: str = "") -> str:
     """Drafts promotional email copy tailored dynamically to student or professional audience profiles."""
     prompt = f"""
@@ -173,10 +167,7 @@ async def run_social_writer(event_id: str, campaign_facts: str, layout: str, fee
     return _parse_content(response.content)
 
 
-# =====================================================================
-# Verification Checkers
-# =====================================================================
-
+#verification checkers
 class CheckerResult(BaseModel):
     status: Literal["PASS", "FAIL"] = Field(
         description="Verification outcome status."
@@ -245,17 +236,21 @@ async def run_style_checker(content_type: str, draft: str, brand_guidelines: str
     return await structured_llm.ainvoke(prompt)
 
 
-# =====================================================================
-# Holistic Campaign Review
-# =====================================================================
-
-async def run_final_reviewer(email_draft: str = "", newsletter_draft: str = "", social_draft: str = "") -> CheckerResult:
-    """Holistic review of all content assets to guarantee overall messaging cohesion."""
+#holistic campaign review
+async def run_final_reviewer(email_draft: str = "", newsletter_draft: str = "", social_draft: str = "", few_shot_examples: str = "") -> CheckerResult:
+    """Holistic review of all content assets to guarantee overall messaging cohesion and match approved standards."""
     structured_llm = llm_strict.with_structured_output(CheckerResult)
     
     prompt = f"""
     You are the Lead Content Director at HiDevs. Review the entire generated campaign bundle.
-    Ensure that the messaging is cohesive and unified across all channels.
+    Ensure that the messaging is cohesive, unified, and matches the style of our previously approved high-converting marketing drafts.
+    
+    Approved HiDevs Copy Examples (for style and tone matching reference):
+    ---
+    {few_shot_examples}
+    ---
+    
+    NOTE: If the Approved Copy Examples section above is empty, proceed with the holistic review by checking for natural tone, clarity, and overall messaging cohesion without reference-matching.
     
     Email Draft:
     ---
