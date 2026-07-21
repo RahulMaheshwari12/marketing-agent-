@@ -305,11 +305,13 @@ async def ingest_knowledge_document(
             shutil.copyfileobj(file.file, buffer)
             
         # Execute the auto-ingest pipeline
-        extracted_id = await auto_ingest_event(temp_file_path, event_id=event_id, category=category)
+        extracted_id, is_updated = await auto_ingest_event(temp_file_path, event_id=event_id, category=category)
+        action = "updated" if is_updated else "created"
         
         return {
             "status": "success",
-            "message": f"File '{file.filename}' successfully ingested under event_id: '{extracted_id}'."
+            "action": action,
+            "message": f"File '{file.filename}' successfully {action} under event_id: '{extracted_id}'."
         }
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))

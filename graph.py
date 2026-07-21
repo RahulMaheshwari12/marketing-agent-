@@ -50,11 +50,11 @@ async def supervisor_node(state: CampaignState) -> Dict:
     if not event_id or not target_contents:
         try:
             valid_events = await get_all_active_events_base()
-        except Exception:
-            valid_events = []
+        except Exception as e:
+            raise ValueError(f"Failed to query active events: {str(e)}")
             
         if not valid_events:
-            valid_events = ["nextjs_bootcamp", "test_hackathon"]
+            raise ValueError("No active events found in the database. Please ingest an event brochure first using POST /api/knowledge/ingest.")
 
         try:
             routing = await run_supervisor(state["user_prompt"], valid_events)
@@ -62,11 +62,11 @@ async def supervisor_node(state: CampaignState) -> Dict:
                 event_id = routing.event_id
             if not target_contents:
                 target_contents = routing.target_contents
-        except Exception:
-            if not event_id:
-                event_id = "test_hackathon"
-            if not target_contents:
-                target_contents = ["email", "social"]
+        except Exception as e:
+            raise ValueError(f"Supervisor routing failed: {str(e)}")
+
+        if event_id == "unrecognized":
+            raise ValueError("No matching event found in the database for your request. Please ingest the brochure first using POST /api/knowledge/ingest.")
 
     return {
         "event_id": event_id,

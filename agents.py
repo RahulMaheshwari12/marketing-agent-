@@ -28,7 +28,7 @@ def _parse_content(content) -> str:
 #campaign coordinator & router
 class SupervisorRouting(BaseModel):
     event_id: str = Field(
-        description="The event slug (e.g., 'nextjs_bootcamp') matched against valid database IDs."
+        description="The event slug (e.g., 'nextjs_bootcamp') matched against valid database IDs. If the user's prompt targets a topic, course, or event that is NOT in the list, you MUST output 'unrecognized'."
     )
     target_contents: list[Literal["email", "newsletter", "social"]] = Field(
         description="The target campaign channels to trigger."
@@ -41,6 +41,7 @@ async def run_supervisor(user_prompt: str, valid_event_ids: list[str]) -> Superv
     prompt = f"""
     You are the Lead Marketing Coordinator at HiDevs. Analyze the user's request and determine:
     1. Which event_id they are targeting. You MUST select the ID from the list of valid database IDs below. Find the closest match.
+       *CRITICAL RULE*: If the user prompt targets an event name, course, or subject that has no relation to the valid database IDs, you MUST return "unrecognized". Do not force-map unrelated topics.
     2. Which content formats (email, newsletter, social) they want to generate.
     
     List of Valid Database Event IDs:
