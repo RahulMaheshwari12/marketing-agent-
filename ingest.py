@@ -279,6 +279,7 @@ async def auto_ingest_event(file_path: str, event_id: str = None, category: str 
         })
         
     print("--- Auto-Ingestion Completed Successfully! ---")
+    return event_id
 
 # Configure CLI parser interface
 if __name__ == "__main__":

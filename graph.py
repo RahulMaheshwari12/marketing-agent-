@@ -12,7 +12,7 @@ from tools import (
     get_layout_template_tool,
     save_campaign_draft_tool,
     update_campaign_status_tool,
-    get_all_active_events_tool,
+    get_all_active_events_base,
     search_branding_style_tool
 )
 
@@ -49,16 +49,10 @@ async def supervisor_node(state: CampaignState) -> Dict:
     # If event_id or target_contents are not pre-populated, use the Supervisor Agent to parse them
     if not event_id or not target_contents:
         try:
-            active_events = await get_all_active_events_tool()
+            valid_events = await get_all_active_events_base()
         except Exception:
-            active_events = "[]"
+            valid_events = []
             
-        valid_events = []
-        for line in active_events.split("\n"):
-            if "Slug:" in line:
-                slug = line.split("Slug:")[1].strip().split(",")[0].strip()
-                valid_events.append(slug)
-                
         if not valid_events:
             valid_events = ["nextjs_bootcamp", "test_hackathon"]
 
@@ -236,7 +230,8 @@ async def reviewer_node(state: CampaignState) -> Dict:
             email_draft=state.get("email_draft", ""),
             newsletter_draft=state.get("newsletter_draft", ""),
             social_draft=state.get("social_draft", ""),
-            few_shot_examples=few_shots
+            few_shot_examples=few_shots,
+            target_contents=state.get("target_contents")
         )
     except Exception as e:
         # Graceful validation bypass if reviewer fails
@@ -282,14 +277,24 @@ async def reviewer_node(state: CampaignState) -> Dict:
             from database import async_firestore_db
             if async_firestore_db:
                 campaign_ref = async_firestore_db.collection("campaigns").document(event_id)
+                
+                is_rewrite = state.get("is_rewrite", False)
+                if is_rewrite:
+                    existing_doc = await campaign_ref.get()
+                    existing_data = existing_doc.to_dict() if existing_doc.exists else {}
+                    db_target_contents = existing_data.get("target_contents") or state.get("target_contents") or []
+                else:
+                    db_target_contents = state.get("target_contents") or []
+                    
                 await campaign_ref.set({
                     "event_id": event_id,
-                    "target_contents": state.get("target_contents") or [],
+                    "target_contents": db_target_contents,
                     "email_draft": state.get("email_draft") or "",
                     "newsletter_draft": state.get("newsletter_draft") or "",
                     "social_draft": state.get("social_draft") or "",
                     "revision_counts": new_revision_counts,
                     "review_feedback": active_feedback,
+                    "channel_statuses": {ch: "review" for ch in state.get("target_contents") or []},
                     "status": "review"
                 }, merge=True)
         except Exception as e:

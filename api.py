@@ -47,13 +47,13 @@ class GenerateRequest(BaseModel):
 
 class ApproveRequest(BaseModel):
     event_id: str
-    email_draft: Optional[str] = None
-    newsletter_draft: Optional[str] = None
-    social_draft: Optional[str] = None
+    channel: str # "email", "newsletter", or "social"
 
 class RejectRequest(BaseModel):
     event_id: str
-    feedback: Optional[Dict[str, str]] = None  # Optional feedback dictionary (e.g. {"email": "make it longer"})
+    channel: str # "email", "newsletter", or "social"
+    feedback: Optional[str] = None # For AI rewrite loop
+    manual_edit: Optional[str] = None # For human manual overwrite
 
 # campaign generation and review endpoints
 
@@ -93,35 +93,9 @@ async def generate_campaign(payload: GenerateRequest):
 
 @api.post("/api/campaigns/approve")
 async def approve_campaign(payload: ApproveRequest):
-    """approve campaign and save human manual edits"""
-    if not payload.event_id:
-        raise HTTPException(status_code=400, detail="event_id is required.")
-        
-    try:
-        campaign_ref = async_firestore_db.collection("campaigns").document(payload.event_id)
-        campaign = await campaign_ref.get()
-        if not campaign.exists:
-            raise HTTPException(status_code=404, detail=f"Campaign not found for ID: {payload.event_id}")
-            
-        # Prepare updates, supporting manual text edits submitted by the human reviewer
-        update_data = {"status": "approved"}
-        if payload.email_draft is not None:
-            update_data["email_draft"] = payload.email_draft
-        if payload.newsletter_draft is not None:
-            update_data["newsletter_draft"] = payload.newsletter_draft
-        if payload.social_draft is not None:
-            update_data["social_draft"] = payload.social_draft
-
-        await campaign_ref.set(update_data, merge=True)
-        return {"status": "success", "message": f"Campaign {payload.event_id} has been approved."}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to approve campaign: {str(e)}")
-
-@api.post("/api/campaigns/reject")
-async def reject_campaign(payload: RejectRequest):
-    """reject campaign and trigger loop revisions with feedback"""
-    if not payload.event_id:
-        raise HTTPException(status_code=400, detail="event_id is required.")
+    """approve specific campaign channel when everything is correct"""
+    if not payload.event_id or not payload.channel:
+        raise HTTPException(status_code=400, detail="event_id and channel are required.")
         
     try:
         campaign_ref = async_firestore_db.collection("campaigns").document(payload.event_id)
@@ -131,52 +105,172 @@ async def reject_campaign(payload: RejectRequest):
             
         campaign_data = campaign_doc.to_dict()
         
-        # If feedback comments are provided, run a revision loop in the graph
-        if payload.feedback:
-            target_contents = []
-            if campaign_data.get("email_draft"):
-                target_contents.append("email")
-            if campaign_data.get("newsletter_draft"):
-                target_contents.append("newsletter")
-            if campaign_data.get("social_draft"):
-                target_contents.append("social")
+        # Get or initialize channel statuses dictionary
+        channel_statuses = campaign_data.get("channel_statuses") or {}
+        target_contents = campaign_data.get("target_contents") or []
+        
+        # Initialize statuses if missing
+        for ch in target_contents:
+            if ch not in channel_statuses:
+                channel_statuses[ch] = "review"
+                
+        if payload.channel not in target_contents:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Channel '{payload.channel}' is not part of this campaign's target contents: {target_contents}"
+            )
+            
+        # Update channel status to approved
+        channel_statuses[payload.channel] = "approved"
+        update_data = {"channel_statuses": channel_statuses}
+        
+        # If all active channels are now approved, mark the overall status as approved
+        all_approved = True
+        for ch in target_contents:
+            if channel_statuses.get(ch) != "approved":
+                all_approved = False
+                break
+                
+        if all_approved:
+            update_data["status"] = "approved"
+        else:
+            update_data["status"] = "review"  # keep in review if other channels are still pending
+            
+        await campaign_ref.set(update_data, merge=True)
+        return {
+            "status": "success", 
+            "message": f"Channel '{payload.channel}' of campaign '{payload.event_id}' has been approved.",
+            "campaign_status": update_data.get("status", "review"),
+            "channel_statuses": channel_statuses
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to approve channel: {str(e)}")
 
+@api.post("/api/campaigns/reject")
+async def reject_campaign(payload: RejectRequest):
+    """reject specific campaign channel and apply manual edit or run automated AI rewrite loop"""
+    if not payload.event_id or not payload.channel:
+        raise HTTPException(status_code=400, detail="event_id and channel are required.")
+    if not payload.feedback and not payload.manual_edit:
+        raise HTTPException(status_code=400, detail="Either feedback or manual_edit is required.")
+        
+    try:
+        campaign_ref = async_firestore_db.collection("campaigns").document(payload.event_id)
+        campaign_doc = await campaign_ref.get()
+        if not campaign_doc.exists:
+            raise HTTPException(status_code=404, detail=f"Campaign not found for ID: {payload.event_id}")
+            
+        campaign_data = campaign_doc.to_dict()
+        target_contents = campaign_data.get("target_contents") or []
+        
+        if payload.channel not in target_contents:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Channel '{payload.channel}' is not part of this campaign's target contents: {target_contents}"
+            )
+            
+        # Get and update channel statuses
+        channel_statuses = campaign_data.get("channel_statuses") or {}
+        for ch in target_contents:
+            if ch not in channel_statuses:
+                channel_statuses[ch] = "review"
+                
+        # Guard: Check if the channel is already approved
+        if channel_statuses.get(payload.channel) == "approved":
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Cannot reject channel '{payload.channel}' because it is already approved."
+            )
+                
+        # Handle manual human edit option
+        if payload.manual_edit is not None:
+            # Overwrite the draft copy directly with human edits (no AI loop)
+            update_data = {
+                f"{payload.channel}_draft": payload.manual_edit,
+                "status": "review"
+            }
+            channel_statuses[payload.channel] = "review" # stays in review for confirmation
+            update_data["channel_statuses"] = channel_statuses
+            await campaign_ref.set(update_data, merge=True)
+            
+            # Fetch fresh state to return
+            updated_doc = await campaign_ref.get()
+            final_data = updated_doc.to_dict()
+            
+            return {
+                "status": "success",
+                "message": f"Manual edit saved successfully for channel '{payload.channel}'.",
+                "campaign_state": {
+                    "event_id": payload.event_id,
+                    "target_contents": target_contents,
+                    "status": "review",
+                    "channel_statuses": channel_statuses,
+                    "revision_counts": final_data.get("revision_counts") or {},
+                    "email_draft": final_data.get("email_draft"),
+                    "newsletter_draft": final_data.get("newsletter_draft"),
+                    "social_draft": final_data.get("social_draft")
+                }
+            }
+            
+        # Handle AI rewrite loop option (feedback provided)
+        else:
+            channel_statuses[payload.channel] = "rejected"
+            
+            # Prepare initial state running rewrite loop ONLY for the rejected channel
             initial_state = {
-                "user_prompt": f"Revise campaign for {payload.event_id}",
+                "user_prompt": f"Revise {payload.channel} draft for campaign {payload.event_id}",
                 "event_id": payload.event_id,
-                "target_contents": target_contents,
+                "target_contents": [payload.channel],
                 "email_draft": campaign_data.get("email_draft", ""),
                 "newsletter_draft": campaign_data.get("newsletter_draft", ""),
                 "social_draft": campaign_data.get("social_draft", ""),
                 "revision_counts": campaign_data.get("revision_counts") or {ch: 0 for ch in target_contents},
-                "review_feedback": payload.feedback,
-                "status": "drafting"
+                "review_feedback": {payload.channel: payload.feedback},
+                "status": "drafting",
+                "is_rewrite": True
             }
             
             # Run graph execution loop
             final_state = await app.ainvoke(initial_state)
             
+            # Get new revision counts and drafts
+            new_revision_counts = final_state.get("revision_counts") or {}
+            
+            # Revert status of this channel back to 'review' for human review
+            channel_statuses[payload.channel] = "review"
+            
+            update_data = {
+                "email_draft": final_state.get("email_draft"),
+                "newsletter_draft": final_state.get("newsletter_draft"),
+                "social_draft": final_state.get("social_draft"),
+                "revision_counts": new_revision_counts,
+                "review_feedback": final_state.get("review_feedback"),
+                "channel_statuses": channel_statuses,
+                "status": "review"
+            }
+            
+            await campaign_ref.set(update_data, merge=True)
+            
             return {
                 "status": "success",
-                "message": "Rejection processed. Automated rewrite loop completed.",
+                "message": f"Rejection processed for channel '{payload.channel}'. Rewrite loop completed.",
                 "campaign_state": {
-                    "event_id": final_state.get("event_id"),
-                    "target_contents": final_state.get("target_contents"),
-                    "status": final_state.get("status"),
-                    "revision_counts": final_state.get("revision_counts"),
-                    "review_feedback": final_state.get("review_feedback"),
-                    "email_draft": final_state.get("email_draft"),
-                    "newsletter_draft": final_state.get("newsletter_draft"),
-                    "social_draft": final_state.get("social_draft")
+                    "event_id": payload.event_id,
+                    "target_contents": target_contents,
+                    "status": "review",
+                    "channel_statuses": channel_statuses,
+                    "revision_counts": new_revision_counts,
+                    "email_draft": update_data["email_draft"],
+                    "newsletter_draft": update_data["newsletter_draft"],
+                    "social_draft": update_data["social_draft"]
                 }
             }
-        else:
-            # If no feedback is provided, simply revert status back to "drafting"
-            await campaign_ref.set({"status": "drafting"}, merge=True)
-            return {"status": "success", "message": f"Campaign {payload.event_id} reverted back to drafting state."}
-            
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to reject campaign: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to reject channel: {str(e)}")
 
 @api.get("/api/campaigns/{event_id}")
 async def get_campaign(event_id: str):
@@ -211,11 +305,11 @@ async def ingest_knowledge_document(
             shutil.copyfileobj(file.file, buffer)
             
         # Execute the auto-ingest pipeline
-        await auto_ingest_event(temp_file_path, event_id=event_id, category=category)
+        extracted_id = await auto_ingest_event(temp_file_path, event_id=event_id, category=category)
         
         return {
             "status": "success",
-            "message": f"File '{file.filename}' successfully ingested into knowledge base."
+            "message": f"File '{file.filename}' successfully ingested under event_id: '{extracted_id}'."
         }
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))
@@ -231,7 +325,7 @@ async def list_events():
     """get all registered event ids from firestore"""
     try:
         events_ref = async_firestore_db.collection("events")
-        docs = await events_ref.stream()
+        docs = events_ref.stream()
         
         events_list = []
         async for doc in docs:
@@ -241,47 +335,61 @@ async def list_events():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to list events: {str(e)}")
 
-@api.get("/api/knowledge/search")
-async def search_knowledge(
-    event_id: str,
-    query: str,
-    category: Optional[str] = Query(None, description="Optional category to filter by"),
-    limit: int = Query(5, description="Number of results to return")
+@api.get("/api/knowledge/events/search")
+async def search_registered_events(
+    query: str = Query(..., description="Query term to search for registered events by ID or name")
 ):
-    """semantic search in qdrant filtered by event id"""
-    if not event_id or not query:
-        raise HTTPException(status_code=400, detail="Both event_id and query parameters are required.")
-        
+    """search for registered event ids or names using keywords and substring matching"""
     try:
-        # embed query
-        query_vector = await embeddings_model.aembed_query(query)
+        events_ref = async_firestore_db.collection("events")
+        docs = events_ref.stream()
         
-        # qdrant filter conditions
-        from qdrant_client.models import Filter, FieldCondition, MatchValue
-        conditions = [FieldCondition(key="metadata.event_id", match=MatchValue(value=event_id))]
-        if category:
-            conditions.append(FieldCondition(key="metadata.category", match=MatchValue(value=category)))
-            
-        # search in qdrant
-        search_results = qdrant_client.search(
-            collection_name=COLLECTION_NAME,
-            query_vector=query_vector,
-            query_filter=Filter(must=conditions),
-            limit=limit
-        )
+        query_lower = query.lower()
+        results = []
         
-        # format hits
-        hits = []
-        for hit in search_results:
-            hits.append({
-                "score": hit.score,
-                "text": hit.payload.get("page_content", ""),
-                "metadata": hit.payload.get("metadata", {})
-            })
+        async for doc in docs:
+            data = doc.to_dict()
+            event_id = data.get("event_id", "").lower()
+            event_name = data.get("event_name", "").lower()
             
-        return {"status": "success", "results": hits}
+            match_score = 0.0
+            # Direct match or substring contains
+            if query_lower in event_id or query_lower in event_name:
+                match_score = 1.0
+            else:
+                # Word-level intersection checks (handles typos or partial matches like 'banglore' matching 'bangalore')
+                query_words = query_lower.split()
+                
+                # Check character level matches for fuzzy similarity
+                from difflib import SequenceMatcher
+                for word in query_words:
+                    # check if word is close to event_id segments or event_name segments
+                    for seg in event_id.split("_"):
+                        ratio = SequenceMatcher(None, word, seg).ratio()
+                        if ratio > 0.7:
+                            match_score = max(match_score, ratio)
+                    for seg in event_name.split():
+                        ratio = SequenceMatcher(None, word, seg.lower()).ratio()
+                        if ratio > 0.7:
+                            match_score = max(match_score, ratio)
+                            
+            if match_score > 0.2:
+                results.append({
+                    "event_id": data.get("event_id"),
+                    "event_name": data.get("event_name"),
+                    "relevance_score": round(match_score, 2),
+                    "price": data.get("price"),
+                    "dates": data.get("dates"),
+                    "registration_url": data.get("registration_url")
+                })
+                
+        # Sort results by relevance score
+        results.sort(key=lambda x: x["relevance_score"], reverse=True)
+        return {"status": "success", "results": results}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to search events: {str(e)}")
+
+
 
 @api.delete("/api/knowledge/{event_id}")
 async def delete_knowledge_records(

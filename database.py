@@ -1,8 +1,15 @@
 import os
+import sys
 from dotenv import load_dotenv
 from qdrant_client import QdrantClient, AsyncQdrantClient
 import firebase_admin
 from firebase_admin import credentials, firestore
+
+# Force console output to UTF-8
+try:
+    sys.stdout.reconfigure(encoding='utf-8')
+except Exception:
+    pass
 
 #load environment variables
 load_dotenv()
@@ -10,17 +17,34 @@ load_dotenv()
 qdrant_url = os.getenv("QDRANT_URL", "http://localhost:6333")
 qdrant_api_key = os.getenv("QDRANT_API_KEY", "")
 
-#initialize sync Qdrant Client (for LangChain compatibility)
-qdrant_client = QdrantClient(
-    url=qdrant_url,
-    api_key=qdrant_api_key if qdrant_api_key else None
-)
+# Initialize sync Qdrant Client with automatic fallback
+use_fallback = False
+if qdrant_url.startswith("http"):
+    try:
+        qdrant_client = QdrantClient(
+            url=qdrant_url,
+            api_key=qdrant_api_key if qdrant_api_key else None,
+            timeout=2.0
+        )
+        # Test connection quickly
+        qdrant_client.get_collections()
+    except Exception:
+        print("⚠️ Qdrant server not running at localhost:6333. Falling back to local disk storage (./qdrant_storage).")
+        qdrant_client = QdrantClient(path="./qdrant_storage")
+        use_fallback = True
+else:
+    qdrant_client = QdrantClient(path=qdrant_url)
 
-#initialize ASYNC Qdrant Client
-async_qdrant_client = AsyncQdrantClient(
-    url=qdrant_url,
-    api_key=qdrant_api_key if qdrant_api_key else None
-)
+# Initialize ASYNC Qdrant Client matching sync client strategy
+if use_fallback:
+    async_qdrant_client = AsyncQdrantClient(path="./qdrant_storage")
+elif qdrant_url.startswith("http"):
+    async_qdrant_client = AsyncQdrantClient(
+        url=qdrant_url,
+        api_key=qdrant_api_key if qdrant_api_key else None
+    )
+else:
+    async_qdrant_client = AsyncQdrantClient(path=qdrant_url)
 
 firebase_cred_path = os.getenv("FIREBASE_CREDENTIALS_PATH", "firebase_key.json")
 
