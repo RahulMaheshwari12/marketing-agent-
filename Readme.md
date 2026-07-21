@@ -190,3 +190,10 @@ If your terminal fails to start the server because port 8000 or database ports a
 ### 3. Connection Errors (Qdrant Server Offline)
 The FastAPI server will start up and run even if your Qdrant container is offline. However, any request that requires semantic search (like `/api/knowledge/ingest` or `/api/campaigns/generate`) will return a `500` error or throw a connection exception.
 * **The Fix**: Make sure your **Docker Desktop** application is running and that your Qdrant container is active and listening on port `6333`.
+
+### 4. Firebase/Firestore Connection & Credentials Errors
+The backend requires access to Firestore to retrieve event states, save campaign drafts, and log review histories. If your Firebase connection fails or credentials are misconfigured, API requests will fail and return a `500` error in the Swagger UI.
+* **The Symptoms**: 
+  * Startup warning: `⚠️ Warning: Firebase credentials file not found at 'firebase_key.json'.`
+  * API response error: `{"detail": "Failed to read/write campaign data: [error details]"}`
+* **The Fix**: Ensure your Service Account credential file is saved as **`firebase_key.json`** directly in the root folder of the project. If you are using a custom location, specify the path in your `.env` file using the `FIREBASE_CREDENTIALS_PATH` variable.
