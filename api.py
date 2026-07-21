@@ -55,6 +55,14 @@ class RejectRequest(BaseModel):
     feedback: Optional[str] = None # For AI rewrite loop
     manual_edit: Optional[str] = None # For human manual overwrite
 
+class ManualMetadataRequest(BaseModel):
+    event_id: str
+    event_name: str
+    registration_url: str = ""
+    price: str = ""
+    dates: str = ""
+    suggested_hashtags: str = ""
+
 # campaign generation and review endpoints
 
 @api.post("/api/campaigns/generate")
@@ -321,6 +329,62 @@ async def ingest_knowledge_document(
         # Clean up temporary uploaded file
         if os.path.exists(temp_file_path):
             os.remove(temp_file_path)
+
+@api.post("/api/knowledge/metadata")
+async def save_manual_metadata(payload: ManualMetadataRequest):
+    """manually save or update static metadata for an event ID in Firestore"""
+    if not payload.event_id.strip() or not payload.event_name.strip():
+        raise HTTPException(status_code=400, detail="event_id and event_name are required and cannot be empty.")
+        
+    try:
+        from ingest import EventMetadata, ingest_static_metadata
+        
+        # Check if the event document already exists to determine if it is an update
+        doc_ref = async_firestore_db.collection("events").document(payload.event_id)
+        doc_snap = await doc_ref.get()
+        is_updated = doc_snap.exists
+        action = "updated" if is_updated else "created"
+        
+        metadata = EventMetadata(
+            event_name=payload.event_name,
+            registration_url=payload.registration_url,
+            price=payload.price,
+            dates=payload.dates,
+            suggested_hashtags=payload.suggested_hashtags
+        )
+        
+        await ingest_static_metadata(payload.event_id, metadata)
+        
+        return {
+            "status": "success",
+            "action": action,
+            "message": f"Metadata for event '{payload.event_id}' has been successfully {action}."
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save manual metadata: {str(e)}")
+
+@api.delete("/api/knowledge/metadata/{event_id}")
+async def delete_manual_metadata(event_id: str):
+    """manually delete static event metadata from Firestore events collection"""
+    if not event_id.strip():
+        raise HTTPException(status_code=400, detail="event_id is required.")
+        
+    try:
+        doc_ref = async_firestore_db.collection("events").document(event_id)
+        doc_snap = await doc_ref.get()
+        if not doc_snap.exists:
+            raise HTTPException(status_code=404, detail=f"No static metadata found for event ID: '{event_id}'")
+            
+        await doc_ref.delete()
+        
+        return {
+            "status": "success",
+            "message": f"Successfully deleted static metadata for event_id: '{event_id}'."
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete metadata: {str(e)}")
 
 @api.get("/api/knowledge/events")
 async def list_events():

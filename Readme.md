@@ -41,6 +41,9 @@ Rather than relying on a single large prompt to write and verify copy, the syste
 * **Duplicate Verification**: To prevent duplicate files from filling up Qdrant collections and wasting API tokens, the system computes a unique MD5 file hash of raw document bytes (`calculate_file_hash`) during ingestion. It compares this hash against previous records in the Firestore `ingestion_metadata` collection. If the hash matches, it halts execution and raises a `400 Bad Request` explaining that the document is already saved.
 * **Clean-on-Ingest (Updating Events)**: If you upload a modified brochure for the same event ID, the file hash will be different (allowing the upload). The system then automatically wipes out all old vector chunks in Qdrant for that specific `event_id` and `category` before inserting the new ones. It also overwrites the static event details (dates, price, registration URL) in Firestore. This allows developers to easily update event parameters by re-uploading with the same `event_id`.
 
+> [!IMPORTANT]
+> **Event ID Matching Rule**: When uploading a PDF/TXT brochure via `/api/knowledge/ingest` and saving manual metadata via `/api/knowledge/metadata`, make sure you use the **exact same `event_id`** (e.g., `bangalore_hackthon`). This ensures that the vector chunks in Qdrant and the static metadata details in Firestore are aligned under the exact same event key.
+
 ### 4. Fuzzy Match Engine (`api.py`)
 * When search terms have minor typos (e.g. `"banglore"` instead of `"bangalore"`), the search route uses `difflib.SequenceMatcher` to run word-level intersection calculations against registered events in Firestore. This provides typo-tolerant matching without requiring complex search server setups.
 
@@ -119,6 +122,40 @@ Uploads a `.txt` or `.pdf` brochure. Returns a `400 Bad Request` if you upload a
     "status": "success",
     "action": "updated",
     "message": "File 'sample_event.txt' successfully updated under event_id: 'bangalore_hackthon'."
+  }
+  ```
+
+#### `POST /api/knowledge/metadata`
+Manually saves or updates static metadata (event name, price, dates, registration URL, suggested hashtags) for an event ID in Firestore without requiring a document file.
+* **Request JSON Payload:**
+  ```json
+  {
+    "event_id": "bangalore_hackthon",
+    "event_name": "Advanced AI Agent Hackathon",
+    "registration_url": "https://hidevs.xyz/hackathon-registration",
+    "price": "$99",
+    "dates": "September 5-6, 2026",
+    "suggested_hashtags": "#AIAgents #Hackathon #GenAI"
+  }
+  ```
+* **Response Payload:**
+  ```json
+  {
+    "status": "success",
+    "action": "created",
+    "message": "Metadata for event 'bangalore_hackthon' has been successfully created."
+  }
+  ```
+
+#### `DELETE /api/knowledge/metadata/{event_id}`
+Manually deletes the static metadata document from the Firestore events collection for a specific event ID.
+* **Path Parameter:**
+  * `event_id`: Custom database key (Required)
+* **Response Payload:**
+  ```json
+  {
+    "status": "success",
+    "message": "Successfully deleted static metadata for event_id: 'bangalore_hackthon'."
   }
   ```
 
