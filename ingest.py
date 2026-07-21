@@ -156,10 +156,18 @@ async def delete_database_records(event_id: str, category: str = None):
             await async_firestore_db.collection("events").document(event_id).delete()
             print(f"Deleting campaign document '{event_id}' from Firestore campaigns collection...")
             await async_firestore_db.collection("campaigns").document(event_id).delete()
+            
+            # Delete ingestion metadata for all potential categories of this event ID
+            print(f"Deleting ingestion metadata for '{event_id}'...")
+            for cat in ["campaign", "professional", "brand_style", "layout_template", "few_shot_example"]:
+                await async_firestore_db.collection("ingestion_metadata").document(f"{event_id}_{cat}").delete()
     else:
         if category == "campaign" and async_firestore_db:
             print(f"Deleting event metadata '{event_id}' from Firestore events collection...")
             await async_firestore_db.collection("events").document(event_id).delete()
+        if async_firestore_db:
+            print(f"Deleting ingestion metadata '{event_id}_{category}'...")
+            await async_firestore_db.collection("ingestion_metadata").document(f"{event_id}_{category}").delete()
             
     print(f"SUCCESS: Database deletion completed successfully for event_id: '{event_id}'.")
 
@@ -211,12 +219,14 @@ async def auto_ingest_event(file_path: str, event_id: str = None, category: str 
 
     # Duplicate Verification Phase: Calculate hash and verify if file has changed
     file_hash = calculate_file_hash(file_path)
+    is_update = False
     if async_firestore_db:
         meta_ref = async_firestore_db.collection("ingestion_metadata").document(f"{event_id}_{category}")
         meta_doc = await meta_ref.get()
-        if meta_doc.exists and meta_doc.to_dict().get("file_hash") == file_hash:
-            print(f"INFO: The file '{file_path}' has already been ingested. Skipping to save API tokens.")
-            return
+        if meta_doc.exists:
+            if meta_doc.to_dict().get("file_hash") == file_hash:
+                raise ValueError(f"This file has already been saved/ingested under event_id: '{event_id}' and category: '{category}'.")
+            is_update = True
 
     # Extraction Phase: Save metadata fields to Firestore for campaigns
     if category == "campaign":
@@ -279,6 +289,7 @@ async def auto_ingest_event(file_path: str, event_id: str = None, category: str 
         })
         
     print("--- Auto-Ingestion Completed Successfully! ---")
+    return event_id, is_update
 
 # Configure CLI parser interface
 if __name__ == "__main__":

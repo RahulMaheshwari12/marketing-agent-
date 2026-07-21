@@ -12,7 +12,7 @@ from tools import (
     get_layout_template_tool,
     save_campaign_draft_tool,
     update_campaign_status_tool,
-    get_all_active_events_tool,
+    get_all_active_events_base,
     search_branding_style_tool
 )
 
@@ -43,38 +43,39 @@ class CampaignState(TypedDict):
 #Node 1: Supervisor Node (Coordinator / Router)
 async def supervisor_node(state: CampaignState) -> Dict:
     """Parses natural language prompt and routes targets using the Supervisor Agent."""
-    try:
-        active_events = await get_all_active_events_tool()
-    except Exception:
-        active_events = "[]"
-        
-    valid_events = []
-    # Clean up the output string to parse event slugs
-    for line in active_events.split("\n"):
-        if "Slug:" in line:
-            slug = line.split("Slug:")[1].strip().split(",")[0].strip()
-            valid_events.append(slug)
-            
-    if not valid_events:
-        valid_events = ["nextjs_bootcamp", "test_hackathon"] # Safe defaults
+    event_id = state.get("event_id")
+    target_contents = state.get("target_contents")
 
-    try:
-        routing = await run_supervisor(state["user_prompt"], valid_events)
-        event_id = routing.event_id
-        target_contents = routing.target_contents
-    except Exception:
-        # Graceful fallback if supervisor fails
-        event_id = "test_hackathon"
-        target_contents = ["email", "social"]
+    # If event_id or target_contents are not pre-populated, use the Supervisor Agent to parse them
+    if not event_id or not target_contents:
+        try:
+            valid_events = await get_all_active_events_base()
+        except Exception as e:
+            raise ValueError(f"Failed to query active events: {str(e)}")
+            
+        if not valid_events:
+            raise ValueError("No active events found in the database. Please ingest an event brochure first using POST /api/knowledge/ingest.")
+
+        try:
+            routing = await run_supervisor(state["user_prompt"], valid_events)
+            if not event_id:
+                event_id = routing.event_id
+            if not target_contents:
+                target_contents = routing.target_contents
+        except Exception as e:
+            raise ValueError(f"Supervisor routing failed: {str(e)}")
+
+        if event_id == "unrecognized":
+            raise ValueError("No matching event found in the database for your request. Please ingest the brochure first using POST /api/knowledge/ingest.")
 
     return {
         "event_id": event_id,
         "target_contents": target_contents,
-        "email_draft": "",
-        "newsletter_draft": "",
-        "social_draft": "",
-        "revision_counts": {channel: 0 for channel in target_contents},
-        "review_feedback": {},
+        "email_draft": state.get("email_draft") or "",
+        "newsletter_draft": state.get("newsletter_draft") or "",
+        "social_draft": state.get("social_draft") or "",
+        "revision_counts": state.get("revision_counts") or {channel: 0 for channel in target_contents},
+        "review_feedback": state.get("review_feedback") or {},
         "status": "drafting"
     }
 
@@ -229,7 +230,8 @@ async def reviewer_node(state: CampaignState) -> Dict:
             email_draft=state.get("email_draft", ""),
             newsletter_draft=state.get("newsletter_draft", ""),
             social_draft=state.get("social_draft", ""),
-            few_shot_examples=few_shots
+            few_shot_examples=few_shots,
+            target_contents=state.get("target_contents")
         )
     except Exception as e:
         # Graceful validation bypass if reviewer fails
@@ -270,17 +272,33 @@ async def reviewer_node(state: CampaignState) -> Dict:
     # Routing Outcome Decision:
     # Scenario A: All passed, or we reached max rewrite limit (safety escape)
     if not feedback_exist or retry_limit_hit:
-        # Atomic commit of approved drafts to Firestore
+        # save drafts and checker logs to firestore
         try:
-            await save_campaign_draft_tool(
-                event_id=event_id,
-                email=state.get("email_draft", ""),
-                newsletter=state.get("newsletter_draft", ""),
-                social=state.get("social_draft", "")
-            )
-            await update_campaign_status_tool(event_id=event_id, status="review")
-        except Exception:
-            pass # Gracefully proceed even if DB commit fails during testing
+            from database import async_firestore_db
+            if async_firestore_db:
+                campaign_ref = async_firestore_db.collection("campaigns").document(event_id)
+                
+                is_rewrite = state.get("is_rewrite", False)
+                if is_rewrite:
+                    existing_doc = await campaign_ref.get()
+                    existing_data = existing_doc.to_dict() if existing_doc.exists else {}
+                    db_target_contents = existing_data.get("target_contents") or state.get("target_contents") or []
+                else:
+                    db_target_contents = state.get("target_contents") or []
+                    
+                await campaign_ref.set({
+                    "event_id": event_id,
+                    "target_contents": db_target_contents,
+                    "email_draft": state.get("email_draft") or "",
+                    "newsletter_draft": state.get("newsletter_draft") or "",
+                    "social_draft": state.get("social_draft") or "",
+                    "revision_counts": new_revision_counts,
+                    "review_feedback": active_feedback,
+                    "channel_statuses": {ch: "review" for ch in state.get("target_contents") or []},
+                    "status": "review"
+                }, merge=True)
+        except Exception as e:
+            print(f"db commit failed: {e}")
             
         return {
             "revision_counts": new_revision_counts,
@@ -299,8 +317,19 @@ async def reviewer_node(state: CampaignState) -> Dict:
 def route_copywriters(state: CampaignState) -> List[str]:
     """Conditional routing splitting execution flow to parallel writer paths."""
     routes = []
-    for channel in state["target_contents"]:
-        routes.append(f"{channel}_writer")
+    # If the execution state has external human feedback, only run the copywriters that failed
+    if state.get("review_feedback"):
+        for channel in state["target_contents"]:
+            if state["review_feedback"].get(channel):
+                routes.append(f"{channel}_writer")
+    else:
+        for channel in state["target_contents"]:
+            routes.append(f"{channel}_writer")
+            
+    # Fallback to trigger all requested channels if no specific feedback is defined
+    if not routes:
+        for channel in state["target_contents"]:
+            routes.append(f"{channel}_writer")
     return routes
 
 
