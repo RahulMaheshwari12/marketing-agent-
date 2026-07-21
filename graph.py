@@ -77,11 +77,11 @@ async def supervisor_node(state: CampaignState) -> Dict:
     return {
         "event_id": event_id,
         "target_contents": target_contents,
-        "email_draft": "",
-        "newsletter_draft": "",
-        "social_draft": "",
-        "revision_counts": {channel: 0 for channel in target_contents},
-        "review_feedback": {},
+        "email_draft": state.get("email_draft") or "",
+        "newsletter_draft": state.get("newsletter_draft") or "",
+        "social_draft": state.get("social_draft") or "",
+        "revision_counts": state.get("revision_counts") or {channel: 0 for channel in target_contents},
+        "review_feedback": state.get("review_feedback") or {},
         "status": "drafting"
     }
 
@@ -277,17 +277,23 @@ async def reviewer_node(state: CampaignState) -> Dict:
     # Routing Outcome Decision:
     # Scenario A: All passed, or we reached max rewrite limit (safety escape)
     if not feedback_exist or retry_limit_hit:
-        # Atomic commit of approved drafts to Firestore
+        # save drafts and checker logs to firestore
         try:
-            await save_campaign_draft_tool(
-                event_id=event_id,
-                email=state.get("email_draft", ""),
-                newsletter=state.get("newsletter_draft", ""),
-                social=state.get("social_draft", "")
-            )
-            await update_campaign_status_tool(event_id=event_id, status="review")
-        except Exception:
-            pass # Gracefully proceed even if DB commit fails during testing
+            from database import async_firestore_db
+            if async_firestore_db:
+                campaign_ref = async_firestore_db.collection("campaigns").document(event_id)
+                await campaign_ref.set({
+                    "event_id": event_id,
+                    "target_contents": state.get("target_contents") or [],
+                    "email_draft": state.get("email_draft") or "",
+                    "newsletter_draft": state.get("newsletter_draft") or "",
+                    "social_draft": state.get("social_draft") or "",
+                    "revision_counts": new_revision_counts,
+                    "review_feedback": active_feedback,
+                    "status": "review"
+                }, merge=True)
+        except Exception as e:
+            print(f"db commit failed: {e}")
             
         return {
             "revision_counts": new_revision_counts,
@@ -306,8 +312,19 @@ async def reviewer_node(state: CampaignState) -> Dict:
 def route_copywriters(state: CampaignState) -> List[str]:
     """Conditional routing splitting execution flow to parallel writer paths."""
     routes = []
-    for channel in state["target_contents"]:
-        routes.append(f"{channel}_writer")
+    # If the execution state has external human feedback, only run the copywriters that failed
+    if state.get("review_feedback"):
+        for channel in state["target_contents"]:
+            if state["review_feedback"].get(channel):
+                routes.append(f"{channel}_writer")
+    else:
+        for channel in state["target_contents"]:
+            routes.append(f"{channel}_writer")
+            
+    # Fallback to trigger all requested channels if no specific feedback is defined
+    if not routes:
+        for channel in state["target_contents"]:
+            routes.append(f"{channel}_writer")
     return routes
 
 
