@@ -145,7 +145,8 @@ Permanently deletes brochure vectors, Firestore metadata, and campaign drafts fo
    ```env
    GEMINI_API_KEY=your_gemini_api_key
    Collection_name=Hidevs_knowledge_base
-   QDRANT_URL=http://localhost:6333
+   QDRANT_URL=http://localhost:6333          # (Optional, defaults to http://localhost:6333)
+   QDRANT_API_KEY=your_qdrant_api_key_here   # (Optional, only for protected or Qdrant Cloud instances)
    # Firestore credentials load automatically from firebase_key.json
    ```
 
@@ -185,3 +186,7 @@ If your terminal fails to start the server because port 8000 or database ports a
     ```cmd
     taskkill /F /IM python.exe
     ```
+
+### 3. Connection Errors (Qdrant Server Offline)
+The FastAPI server will start up and run even if your Qdrant container is offline. However, any request that requires semantic search (like `/api/knowledge/ingest` or `/api/campaigns/generate`) will return a `500` error or throw a connection exception.
+* **The Fix**: Make sure your **Docker Desktop** application is running and that your Qdrant container is active and listening on port `6333`.
