@@ -1,0 +1,10 @@
+spec_version: 0.1.0
+name: hidevs-marketing-swarm
+version: 1.0.0
+description: Business process automation worker for multi-channel marketing campaigns.
+author: HiDevs Community
+license: MIT
+model:
+  preferred: gemini-1.5-flash
+  fallback:
+    - gemini-1.5-pro

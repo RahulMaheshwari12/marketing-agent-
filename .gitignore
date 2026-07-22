@@ -29,3 +29,6 @@ generated_campaign_drafts.html
 future_implementation_plan.html
 api_summary.html
 qdrant_storage/
+gemini-code-*.html
+temp_upload/
+system_architecture_deep_dive.html

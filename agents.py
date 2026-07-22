@@ -60,6 +60,8 @@ async def run_supervisor(user_prompt: str, valid_event_ids: list[str]) -> Superv
 async def run_email_writer(event_id: str, campaign_facts: str, layout: str, feedback: str = "") -> str:
     """Drafts promotional email copy tailored dynamically to student or professional audience profiles."""
     prompt = f"""
+    TARGET EVENT ID: {event_id}
+
     You are a professional Email Marketing Copywriter at HiDevs.
     
     TASK:
