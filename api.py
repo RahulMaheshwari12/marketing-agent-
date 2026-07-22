@@ -1,6 +1,6 @@
 import os
 import shutil
-from typing import List, Dict, Optional
+from typing import Optional
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel

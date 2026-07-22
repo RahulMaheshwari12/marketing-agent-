@@ -1,5 +1,4 @@
 import asyncio
-import sys
 from typing import TypedDict, List, Dict
 from langgraph.graph import StateGraph, START, END
 
@@ -10,8 +9,6 @@ from tools import (
     search_trainer_bios_tool,
     search_few_shot_examples_tool,
     get_layout_template_tool,
-    save_campaign_draft_tool,
-    update_campaign_status_tool,
     get_all_active_events_base,
     search_branding_style_tool
 )
